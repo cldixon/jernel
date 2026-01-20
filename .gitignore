@@ -1,0 +1,37 @@
+# -- binaries
+jernel
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# -- build output
+/dist/
+/build/
+
+# -- test binary, built with `go test -c`
+*.test
+
+# -- coverage
+*.out
+coverage.html
+
+# -- dependency directories (if using vendor)
+/vendor/
+
+# -- IDE/editor
+*.swp
+*.swo
+*~
+.DS_Store
+
+# -- environment files
+.env
+.env.local
+
+# -- debug
+__debug_bin*
+
+# Local config (user's config, not project config)
+# We don't ignore internal/config/defaults/ since those ship with the app

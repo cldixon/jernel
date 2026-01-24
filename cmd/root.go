@@ -8,10 +8,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Version is set at build time via -ldflags
+var Version = "dev"
+
 var rootCmd = &cobra.Command{
-	Use:   "jernel",
-	Short: "A journal for your machine's soul",
-	Long:  `jernel gives your computer a voice by translating system metrics into personal journal entries.`,
+	Use:     "jernel",
+	Short:   "A journal for your machine's soul",
+	Long:    `jernel gives your computer a voice by translating system metrics into personal journal entries.`,
+	Version: Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return config.Init()
 	},

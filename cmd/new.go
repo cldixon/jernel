@@ -59,7 +59,7 @@ var newCmd = &cobra.Command{
 			return err
 		}
 
-		content, err := client.GenerateEntry(ctx, p.Description, snapshot)
+		result, err := client.GenerateEntry(ctx, p.Description, snapshot)
 		if err != nil {
 			return err
 		}
@@ -71,13 +71,13 @@ var newCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		entry, err := db.Save(p.Name, content, snapshot)
+		entry, err := db.Save(p.Name, result.Content, result.ModelID, result.MessageID, snapshot)
 		if err != nil {
 			return fmt.Errorf("failed to save entry: %w", err)
 		}
 
 		fmt.Println("---")
-		fmt.Println(content)
+		fmt.Println(result.Content)
 		fmt.Println("---")
 		fmt.Printf("\nSaved as entry #%d\n", entry.ID)
 

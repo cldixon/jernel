@@ -26,7 +26,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Provider:       "anthropic",
-		Model:          "claude-sonnet-4-20250514",
+		Model:          "claude-4-5-sonnet-20250514",
 		DefaultPersona: "default",
 	}
 }

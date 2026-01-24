@@ -82,8 +82,12 @@ func printEntry(e *store.Entry) {
 	fmt.Printf("Entry #%d\n", e.ID)
 	fmt.Printf("Persona: %s\n", e.Persona)
 	fmt.Printf("Date: %s\n", e.CreatedAt.Format("Monday, January 02, 2006 at 3:04 PM"))
-	fmt.Printf("System: CPU %.1f%% | Memory %.1f%% | Disk %.1f%% | Uptime %s\n",
-		e.CPUPercent, e.MemoryPercent, e.DiskPercent, e.Uptime)
+	fmt.Printf("Model: %s\n", e.ModelID)
+	if e.MetricsSnapshot != nil {
+		m := e.MetricsSnapshot
+		fmt.Printf("System: CPU %.1f%% | Memory %.1f%% | Disk %.1f%% | Uptime %s\n",
+			m.CPUPercent, m.MemoryPercent, m.DiskPercent, m.Uptime)
+	}
 	fmt.Println()
 	fmt.Println("---")
 	fmt.Println(e.Content)

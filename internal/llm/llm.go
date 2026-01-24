@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/cldixon/jernel/internal/config"
@@ -19,6 +20,10 @@ type Client struct {
 
 // NewClient creates a new LLM client using settings from config
 func NewClient(cfg *config.Config) (*Client, error) {
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable is not set\n\nSet it with: export ANTHROPIC_API_KEY=your-key-here")
+	}
+
 	systemPrompt, err := config.LoadSystemPrompt()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load system prompt: %w", err)
@@ -31,12 +36,19 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	}, nil
 }
 
+// GenerateResult contains the generated entry and metadata from the API call
+type GenerateResult struct {
+	Content   string
+	ModelID   string
+	MessageID string
+}
+
 // GenerateEntry creates a journal entry based on system metrics
-func (c *Client) GenerateEntry(ctx context.Context, personaDescription string, snapshot *metrics.Snapshot) (string, error) {
+func (c *Client) GenerateEntry(ctx context.Context, personaDescription string, snapshot *metrics.Snapshot) (*GenerateResult, error) {
 	promptCtx := prompt.NewContext(personaDescription, snapshot)
 	promptText, err := prompt.RenderDefault(promptCtx)
 	if err != nil {
-		return "", fmt.Errorf("failed to render prompt: %w", err)
+		return nil, fmt.Errorf("failed to render prompt: %w", err)
 	}
 
 	message, err := c.api.Messages.New(ctx, anthropic.MessageNewParams{
@@ -53,14 +65,18 @@ func (c *Client) GenerateEntry(ctx context.Context, personaDescription string, s
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to generate entry: %w", err)
+		return nil, fmt.Errorf("failed to generate entry: %w", err)
 	}
 
 	for _, block := range message.Content {
 		if block.Type == "text" {
-			return block.Text, nil
+			return &GenerateResult{
+				Content:   block.Text,
+				ModelID:   string(message.Model),
+				MessageID: message.ID,
+			}, nil
 		}
 	}
 
-	return "", fmt.Errorf("no text content in response")
+	return nil, fmt.Errorf("no text content in response")
 }

@@ -6,21 +6,20 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/cldixon/jernel/internal/config"
 	"github.com/cldixon/jernel/internal/metrics"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Entry represents a saved journal entry
 type Entry struct {
-	ID            int64
-	Persona       string
-	Content       string
-	CreatedAt     time.Time
-	Uptime        string
-	CPUPercent    float64
-	MemoryPercent float64
-	DiskPercent   float64
+	ID              int64
+	Persona         string
+	Content         string
+	CreatedAt       time.Time
+	ModelID         string
+	MessageID       string
+	MetricsSnapshot *metrics.Snapshot
 }
 
 // Store handles persistence of journal entries
@@ -71,10 +70,9 @@ func (s *Store) migrate() error {
 		persona TEXT NOT NULL,
 		content TEXT NOT NULL,
 		created_at DATETIME NOT NULL,
-		uptime TEXT,
-		cpu_percent REAL,
-		memory_percent REAL,
-		disk_percent REAL
+		model_id TEXT NOT NULL,
+		message_id TEXT NOT NULL,
+		metrics_snapshot TEXT
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_entries_created_at ON entries(created_at);
@@ -90,18 +88,22 @@ func (s *Store) migrate() error {
 }
 
 // Save persists a new journal entry
-func (s *Store) Save(persona string, content string, snapshot *metrics.Snapshot) (*Entry, error) {
+func (s *Store) Save(persona string, content string, modelID string, messageID string, snapshot *metrics.Snapshot) (*Entry, error) {
+	metricsJSON, err := snapshot.ToJSON()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize metrics: %w", err)
+	}
+
 	result, err := s.db.Exec(`
-		INSERT INTO entries (persona, content, created_at, uptime, cpu_percent, memory_percent, disk_percent)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO entries (persona, content, created_at, model_id, message_id, metrics_snapshot)
+		VALUES (?, ?, ?, ?, ?, ?)
 	`,
 		persona,
 		content,
 		snapshot.Timestamp,
-		snapshot.Uptime.String(),
-		snapshot.CPUPercent,
-		snapshot.MemoryPercent,
-		snapshot.DiskPercent,
+		modelID,
+		messageID,
+		metricsJSON,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save entry: %w", err)
@@ -113,21 +115,20 @@ func (s *Store) Save(persona string, content string, snapshot *metrics.Snapshot)
 	}
 
 	return &Entry{
-		ID:            id,
-		Persona:       persona,
-		Content:       content,
-		CreatedAt:     snapshot.Timestamp,
-		Uptime:        snapshot.Uptime.String(),
-		CPUPercent:    snapshot.CPUPercent,
-		MemoryPercent: snapshot.MemoryPercent,
-		DiskPercent:   snapshot.DiskPercent,
+		ID:              id,
+		Persona:         persona,
+		Content:         content,
+		CreatedAt:       snapshot.Timestamp,
+		ModelID:         modelID,
+		MessageID:       messageID,
+		MetricsSnapshot: snapshot,
 	}, nil
 }
 
 // GetByID retrieves a single entry by ID
 func (s *Store) GetByID(id int64) (*Entry, error) {
 	row := s.db.QueryRow(`
-		SELECT id, persona, content, created_at, uptime, cpu_percent, memory_percent, disk_percent
+		SELECT id, persona, content, created_at, model_id, message_id, metrics_snapshot
 		FROM entries
 		WHERE id = ?
 	`, id)
@@ -138,7 +139,7 @@ func (s *Store) GetByID(id int64) (*Entry, error) {
 // List retrieves entries with optional limit, newest first
 func (s *Store) List(limit int) ([]*Entry, error) {
 	rows, err := s.db.Query(`
-		SELECT id, persona, content, created_at, uptime, cpu_percent, memory_percent, disk_percent
+		SELECT id, persona, content, created_at, model_id, message_id, metrics_snapshot
 		FROM entries
 		ORDER BY created_at DESC
 		LIMIT ?
@@ -154,7 +155,7 @@ func (s *Store) List(limit int) ([]*Entry, error) {
 // ListByPersona retrieves entries for a specific persona
 func (s *Store) ListByPersona(persona string, limit int) ([]*Entry, error) {
 	rows, err := s.db.Query(`
-		SELECT id, persona, content, created_at, uptime, cpu_percent, memory_percent, disk_percent
+		SELECT id, persona, content, created_at, model_id, message_id, metrics_snapshot
 		FROM entries
 		WHERE persona = ?
 		ORDER BY created_at DESC
@@ -175,15 +176,15 @@ type scanner interface {
 
 func scanEntry(s scanner) (*Entry, error) {
 	var e Entry
+	var metricsJSON sql.NullString
 	err := s.Scan(
 		&e.ID,
 		&e.Persona,
 		&e.Content,
 		&e.CreatedAt,
-		&e.Uptime,
-		&e.CPUPercent,
-		&e.MemoryPercent,
-		&e.DiskPercent,
+		&e.ModelID,
+		&e.MessageID,
+		&metricsJSON,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("entry not found")
@@ -191,6 +192,15 @@ func scanEntry(s scanner) (*Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan entry: %w", err)
 	}
+
+	if metricsJSON.Valid {
+		snapshot, err := metrics.SnapshotFromJSON(metricsJSON.String)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse metrics: %w", err)
+		}
+		e.MetricsSnapshot = snapshot
+	}
+
 	return &e, nil
 }
 

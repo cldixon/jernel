@@ -3,6 +3,15 @@
 A journal for your machine's soul. jernel gives your computer a voice by translating system metrics into personal journal entries using LLMs.
 
 ## Installation
+
+Quick install (macOS arm64, Linux amd64):
+```bash
+curl -sSL https://raw.githubusercontent.com/cldixon/jernel/main/install.sh | sh
+```
+
+Or download a binary directly from [Releases](https://github.com/cldixon/jernel/releases).
+
+Or install with Go:
 ```bash
 go install github.com/cldixon/jernel@latest
 ```
@@ -12,6 +21,11 @@ Or build from source:
 git clone https://github.com/cldixon/jernel.git
 cd jernel
 go build -o jernel .
+```
+
+Check your installed version:
+```bash
+jernel --version
 ```
 
 ## Configuration

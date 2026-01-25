@@ -35,3 +35,5 @@ __debug_bin*
 
 # Local config (user's config, not project config)
 # We don't ignore internal/config/defaults/ since those ship with the app
+
+CLAUDE.md

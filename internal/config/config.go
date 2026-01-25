@@ -15,11 +15,28 @@ var DefaultSystemPrompt string
 //go:embed defaults/personas/*.md
 var defaultPersonasFS embed.FS
 
+// DaemonConfig holds settings for autonomous entry generation
+type DaemonConfig struct {
+	Rate       int      `yaml:"rate"`        // number of entries per period
+	RatePeriod string   `yaml:"rate_period"` // "hour", "day", or "week"
+	Personas   []string `yaml:"personas"`    // personas to randomly select from
+}
+
 // Config holds application-level settings
 type Config struct {
-	Provider       string `yaml:"provider"`
-	Model          string `yaml:"model"`
-	DefaultPersona string `yaml:"default_persona"`
+	Provider       string        `yaml:"provider"`
+	Model          string        `yaml:"model"`
+	DefaultPersona string        `yaml:"default_persona"`
+	Daemon         *DaemonConfig `yaml:"daemon,omitempty"`
+}
+
+// DefaultDaemonConfig returns sensible defaults for daemon settings
+func DefaultDaemonConfig() *DaemonConfig {
+	return &DaemonConfig{
+		Rate:       3,
+		RatePeriod: "day",
+		Personas:   []string{},
+	}
 }
 
 // DefaultConfig returns sensible defaults
@@ -28,6 +45,7 @@ func DefaultConfig() *Config {
 		Provider:       "anthropic",
 		Model:          "claude-4-5-sonnet-20250514",
 		DefaultPersona: "default",
+		Daemon:         DefaultDaemonConfig(),
 	}
 }
 
@@ -67,6 +85,11 @@ func Load() (*Config, error) {
 	cfg := DefaultConfig()
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Ensure daemon config has defaults if not specified
+	if cfg.Daemon == nil {
+		cfg.Daemon = DefaultDaemonConfig()
 	}
 
 	return cfg, nil

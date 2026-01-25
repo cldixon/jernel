@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -10,7 +12,16 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/cldixon/jernel/internal/persona"
 	"github.com/cldixon/jernel/internal/store"
+)
+
+// View modes
+type viewMode int
+
+const (
+	viewEntries viewMode = iota
+	viewPersonas
 )
 
 // Color palette - blue/green theme
@@ -22,6 +33,7 @@ var (
 	colorSubtle     = lipgloss.Color("#45475A") // dark gray
 	colorText       = lipgloss.Color("#CDD6F4") // light text
 	colorBrightText = lipgloss.Color("#FFFFFF") // white
+	colorOverlay    = lipgloss.Color("#1E1E2E") // dark background
 )
 
 // Styles
@@ -112,6 +124,27 @@ var (
 				Foreground(colorPrimary).
 				Bold(true).
 				MarginBottom(1)
+
+	// Modal overlay styles
+	modalStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorPrimary).
+			Padding(1, 2)
+
+	modalTitleStyle = lipgloss.NewStyle().
+			Foreground(colorSecondary).
+			Bold(true).
+			Padding(0, 1)
+
+	personaFileStyle = lipgloss.NewStyle().
+				Foreground(colorAccent)
+
+	personaNameStyle = lipgloss.NewStyle().
+				Foreground(colorText).
+				Bold(true)
+
+	personaDescStyle = lipgloss.NewStyle().
+				Foreground(colorMuted)
 )
 
 // entryItem wraps a store.Entry for the list
@@ -124,7 +157,6 @@ func (i entryItem) Title() string {
 }
 
 func (i entryItem) Description() string {
-	// Show relative time and content preview
 	relTime := formatRelativeTime(i.entry.CreatedAt)
 	preview := getContentPreview(i.entry.Content, 40)
 	return fmt.Sprintf("%s · %s", relTime, preview)
@@ -134,8 +166,27 @@ func (i entryItem) FilterValue() string {
 	return i.entry.Persona + " " + i.entry.Content
 }
 
+// personaItem wraps a persona for the list
+type personaItem struct {
+	persona *persona.Persona
+}
+
+func (i personaItem) Title() string {
+	return i.persona.Name + ".md"
+}
+
+func (i personaItem) Description() string {
+	preview := getContentPreview(i.persona.Description, 50)
+	return preview
+}
+
+func (i personaItem) FilterValue() string {
+	return i.persona.Name + " " + i.persona.Description
+}
+
 // Model is the main TUI model
 type Model struct {
+	// Main view
 	list         list.Model
 	viewport     viewport.Model
 	entries      []*store.Entry
@@ -144,9 +195,18 @@ type Model struct {
 	height       int
 	renderer     *glamour.TermRenderer
 	quitting     bool
-	showMetrics  bool // toggle for metrics panel
-	metricsWidth int  // width of metrics panel when visible
+	showMetrics  bool
+	metricsWidth int
+
+	// Persona modal
+	viewMode        viewMode
+	personaList     list.Model
+	personaViewport viewport.Model
+	personas        []*persona.Persona
 }
+
+// editorFinishedMsg is sent when the external editor closes
+type editorFinishedMsg struct{ err error }
 
 // New creates a new TUI model with the given entries
 func New(entries []*store.Entry) (*Model, error) {
@@ -164,7 +224,7 @@ func New(entries []*store.Entry) (*Model, error) {
 		items[i] = entryItem{entry: e}
 	}
 
-	// Create list with custom delegate
+	// Create entry list with custom delegate
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
 		Foreground(colorSecondary).
@@ -195,6 +255,7 @@ func New(entries []*store.Entry) (*Model, error) {
 		renderer:     renderer,
 		showMetrics:  true,
 		metricsWidth: 32,
+		viewMode:     viewEntries,
 	}, nil
 }
 
@@ -208,17 +269,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-		case "m":
-			m.showMetrics = !m.showMetrics
-			m.recalculateLayout()
-			m.updateViewportContent()
-			return m, nil
+	case editorFinishedMsg:
+		// Reload personas after editing
+		if m.viewMode == viewPersonas {
+			m.loadPersonas()
+			m.updatePersonaViewportContent()
 		}
+		return m, nil
+
+	case tea.KeyMsg:
+		// Handle view-specific keys
+		if m.viewMode == viewPersonas {
+			return m.updatePersonaView(msg)
+		}
+		return m.updateEntriesView(msg)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -226,6 +290,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalculateLayout()
 		m.ready = true
 		m.updateViewportContent()
+		if m.viewMode == viewPersonas {
+			m.recalculatePersonaLayout()
+			m.updatePersonaViewportContent()
+		}
 	}
 
 	// Update list
@@ -234,7 +302,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.list, listCmd = m.list.Update(msg)
 	cmds = append(cmds, listCmd)
 
-	// If selection changed, update viewport
 	if prevIndex != m.list.Index() {
 		m.updateViewportContent()
 	}
@@ -245,6 +312,167 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, vpCmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+// updateEntriesView handles input for the main entries view
+func (m *Model) updateEntriesView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "m":
+		m.showMetrics = !m.showMetrics
+		m.recalculateLayout()
+		m.updateViewportContent()
+		return m, nil
+	case "p":
+		m.viewMode = viewPersonas
+		m.loadPersonas()
+		m.recalculatePersonaLayout()
+		m.updatePersonaViewportContent()
+		return m, nil
+	}
+	return m, nil
+}
+
+// updatePersonaView handles input for the persona modal
+func (m *Model) updatePersonaView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c", "p", "esc":
+		m.viewMode = viewEntries
+		return m, nil
+	case "e":
+		// Open selected persona in editor
+		return m, m.openPersonaInEditor()
+	}
+
+	// Update persona list
+	var cmd tea.Cmd
+	prevIndex := m.personaList.Index()
+	m.personaList, cmd = m.personaList.Update(msg)
+
+	if prevIndex != m.personaList.Index() {
+		m.updatePersonaViewportContent()
+	}
+
+	// Update persona viewport for scrolling
+	var vpCmd tea.Cmd
+	m.personaViewport, vpCmd = m.personaViewport.Update(msg)
+
+	return m, tea.Batch(cmd, vpCmd)
+}
+
+// loadPersonas loads all personas from disk
+func (m *Model) loadPersonas() {
+	names, err := persona.List()
+	if err != nil {
+		return
+	}
+
+	m.personas = make([]*persona.Persona, 0, len(names))
+	items := make([]list.Item, 0, len(names))
+
+	for _, name := range names {
+		p, err := persona.Get(name)
+		if err != nil {
+			continue
+		}
+		m.personas = append(m.personas, p)
+		items = append(items, personaItem{persona: p})
+	}
+
+	// Create persona list
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
+		Foreground(colorSecondary).
+		BorderLeftForeground(colorSecondary)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
+		Foreground(colorMuted).
+		BorderLeftForeground(colorSecondary)
+	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
+		Foreground(colorText)
+	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.
+		Foreground(colorSubtle)
+
+	m.personaList = list.New(items, delegate, 0, 0)
+	m.personaList.Title = "📁 personas/"
+	m.personaList.SetShowStatusBar(false)
+	m.personaList.SetFilteringEnabled(true)
+	m.personaList.Styles.Title = modalTitleStyle
+	m.personaList.Styles.FilterPrompt = lipgloss.NewStyle().Foreground(colorAccent)
+	m.personaList.Styles.FilterCursor = lipgloss.NewStyle().Foreground(colorSecondary)
+}
+
+// recalculatePersonaLayout sets up the persona modal layout
+func (m *Model) recalculatePersonaLayout() {
+	modalWidth := m.width * 3 / 4
+	modalHeight := m.height * 3 / 4
+	listWidth := modalWidth / 3
+
+	m.personaList.SetSize(listWidth, modalHeight-6)
+	m.personaViewport = viewport.New(modalWidth-listWidth-8, modalHeight-6)
+	m.personaViewport.Style = lipgloss.NewStyle().Padding(0, 1)
+}
+
+// updatePersonaViewportContent renders the selected persona
+func (m *Model) updatePersonaViewportContent() {
+	if len(m.personas) == 0 {
+		m.personaViewport.SetContent(
+			lipgloss.NewStyle().Foreground(colorMuted).Render("No personas found"))
+		return
+	}
+
+	selected := m.personaList.SelectedItem()
+	if selected == nil {
+		return
+	}
+
+	item := selected.(personaItem)
+	p := item.persona
+
+	var content strings.Builder
+
+	// File name header
+	content.WriteString(personaFileStyle.Render(p.Name+".md") + "\n\n")
+
+	// Frontmatter
+	content.WriteString(dividerStyle.Render("---") + "\n")
+	content.WriteString(personaNameStyle.Render("name: ") + lipgloss.NewStyle().Foreground(colorText).Render(p.Name) + "\n")
+	content.WriteString(dividerStyle.Render("---") + "\n\n")
+
+	// Description
+	content.WriteString(personaDescStyle.Render(p.Description))
+
+	m.personaViewport.SetContent(content.String())
+}
+
+// openPersonaInEditor opens the selected persona file in $EDITOR
+func (m *Model) openPersonaInEditor() tea.Cmd {
+	selected := m.personaList.SelectedItem()
+	if selected == nil {
+		return nil
+	}
+
+	item := selected.(personaItem)
+	p := item.persona
+
+	// Get persona file path
+	dir, err := persona.Dir()
+	if err != nil {
+		return nil
+	}
+	filePath := dir + "/" + p.Name + ".md"
+
+	// Get editor from environment
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vim" // fallback
+	}
+
+	c := exec.Command(editor, filePath)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return editorFinishedMsg{err}
+	})
 }
 
 // recalculateLayout adjusts component sizes based on current window and panel visibility
@@ -303,20 +531,17 @@ func (m *Model) renderMetricsPanel() string {
 	content.WriteString(metricsTitleStyle.Render("System Metrics"))
 	content.WriteString("\n\n")
 
-	// Helper function to add a metric row
 	addMetric := func(label, value string) {
 		content.WriteString(metricLabelStyle.Render(label))
 		content.WriteString(metricValueStyle.Render(value))
 		content.WriteString("\n")
 	}
 
-	// Core metrics (always present)
 	addMetric("Uptime", formatDuration(snapshot.Uptime))
 	addMetric("CPU", fmt.Sprintf("%.1f%%", snapshot.CPUPercent))
 	addMetric("Memory", fmt.Sprintf("%.1f%%", snapshot.MemoryPercent))
 	addMetric("Disk", fmt.Sprintf("%.1f%%", snapshot.DiskPercent))
 
-	// Optional metrics
 	if snapshot.LoadAverages != nil {
 		content.WriteString("\n")
 		addMetric("Load (1m)", fmt.Sprintf("%.2f", snapshot.LoadAverages.Load1))
@@ -355,20 +580,17 @@ func (m *Model) renderMetricsPanel() string {
 		Render(content.String())
 }
 
-// renderEntryHeader creates a styled header for the entry (outside glamour)
+// renderEntryHeader creates a styled header for the entry
 func (m *Model) renderEntryHeader(entry *store.Entry) string {
 	var header strings.Builder
 
-	// Title with persona tag
 	title := entryTitleStyle.Render(fmt.Sprintf("Entry #%d", entry.ID))
 	tag := personaTagStyle.Render(entry.Persona)
 	header.WriteString(title + tag + "\n")
 
-	// Date
 	date := entryDateStyle.Render(entry.CreatedAt.Format("Monday, January 02, 2006 at 3:04 PM"))
 	header.WriteString(date + "\n\n")
 
-	// Divider
 	dividerWidth := 50
 	divider := dividerStyle.Render(strings.Repeat("─", dividerWidth))
 	header.WriteString(divider + "\n\n")
@@ -391,10 +613,8 @@ func (m *Model) updateViewportContent() {
 	item := selected.(entryItem)
 	entry := item.entry
 
-	// Render header with lipgloss (outside glamour for better control)
 	header := m.renderEntryHeader(entry)
 
-	// Render content with glamour
 	renderedContent, err := m.renderer.Render(entry.Content)
 	if err != nil {
 		m.viewport.SetContent(fmt.Sprintf("Error rendering: %v", err))
@@ -431,7 +651,7 @@ func (m *Model) renderScrollIndicator() string {
 	return scrollIndicatorStyle.Render(fmt.Sprintf(" ↕ %.0f%%", percent))
 }
 
-// renderHelpBar creates the bottom help bar
+// renderHelpBar creates the bottom help bar for entries view
 func (m *Model) renderHelpBar() string {
 	var keys []string
 
@@ -440,6 +660,7 @@ func (m *Model) renderHelpBar() string {
 	}
 
 	addKey("q", "quit")
+	addKey("p", "personas")
 	if m.showMetrics {
 		addKey("m", "hide metrics")
 	} else {
@@ -447,12 +668,64 @@ func (m *Model) renderHelpBar() string {
 	}
 	addKey("↑↓", "navigate")
 	addKey("/", "filter")
-	addKey("pgup/pgdn", "scroll")
 
 	scrollIndicator := m.renderScrollIndicator()
 
 	helpContent := strings.Join(keys, helpDescStyle.Render("  •  "))
 	return helpStyle.Render(helpContent + scrollIndicator)
+}
+
+// renderPersonaHelpBar creates the help bar for persona view
+func (m *Model) renderPersonaHelpBar() string {
+	var keys []string
+
+	addKey := func(key, desc string) {
+		keys = append(keys, helpKeyStyle.Render(key)+helpDescStyle.Render(" "+desc))
+	}
+
+	addKey("esc/p", "back")
+	addKey("e", "edit")
+	addKey("↑↓", "navigate")
+	addKey("/", "filter")
+
+	helpContent := strings.Join(keys, helpDescStyle.Render("  •  "))
+	return helpStyle.Render(helpContent)
+}
+
+// renderPersonaModal renders the persona browser modal
+func (m *Model) renderPersonaModal() string {
+	modalWidth := m.width * 3 / 4
+	modalHeight := m.height * 3 / 4
+
+	// List pane
+	listView := m.personaList.View()
+
+	// Content pane
+	contentView := m.personaViewport.View()
+
+	// Combine list and content horizontally
+	innerContent := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(modalWidth/3).Render(listView),
+		lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), false, false, false, true).
+			BorderForeground(colorSubtle).
+			PaddingLeft(2).
+			Render(contentView),
+	)
+
+	// Wrap in modal border
+	modal := modalStyle.
+		Width(modalWidth).
+		Height(modalHeight).
+		Render(innerContent)
+
+	// Center the modal
+	return lipgloss.Place(m.width, m.height-2,
+		lipgloss.Center, lipgloss.Center,
+		modal,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(colorOverlay),
+	)
 }
 
 // View implements tea.Model
@@ -465,10 +738,17 @@ func (m *Model) View() string {
 		return lipgloss.NewStyle().Foreground(colorPrimary).Render("  Loading...")
 	}
 
+	// Persona modal view
+	if m.viewMode == viewPersonas {
+		modalView := m.renderPersonaModal()
+		helpBar := m.renderPersonaHelpBar()
+		return lipgloss.JoinVertical(lipgloss.Left, modalView, helpBar)
+	}
+
+	// Main entries view
 	listView := listStyle.Render(m.list.View())
 	contentView := m.viewport.View()
 
-	// Build the main horizontal layout
 	var mainView string
 	if m.showMetrics {
 		metricsView := m.renderMetricsPanel()
@@ -477,7 +757,6 @@ func (m *Model) View() string {
 		mainView = lipgloss.JoinHorizontal(lipgloss.Top, listView, contentView)
 	}
 
-	// Add help bar at the bottom
 	helpBar := m.renderHelpBar()
 
 	return lipgloss.JoinVertical(lipgloss.Left, mainView, helpBar)
@@ -485,7 +764,6 @@ func (m *Model) View() string {
 
 // Helper functions
 
-// formatDuration formats a duration in a human-readable way
 func formatDuration(d time.Duration) string {
 	days := int(d.Hours() / 24)
 	hours := int(d.Hours()) % 24
@@ -500,7 +778,6 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm", mins)
 }
 
-// formatRelativeTime returns a human-readable relative time string
 func formatRelativeTime(t time.Time) string {
 	now := time.Now()
 	diff := now.Sub(t)
@@ -531,9 +808,7 @@ func formatRelativeTime(t time.Time) string {
 	}
 }
 
-// getContentPreview returns a truncated preview of the content
 func getContentPreview(content string, maxLen int) string {
-	// Remove markdown formatting and newlines for preview
 	preview := strings.ReplaceAll(content, "\n", " ")
 	preview = strings.ReplaceAll(preview, "#", "")
 	preview = strings.ReplaceAll(preview, "*", "")

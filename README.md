@@ -53,6 +53,11 @@ Use a specific persona:
 jernel new --persona dramatic
 ```
 
+Open the interactive journal viewer:
+```bash
+jernel open
+```
+
 List recent entries:
 ```bash
 jernel read --list

@@ -440,8 +440,13 @@ func (m *Model) updatePersonaViewportContent() {
 	content.WriteString(personaNameStyle.Render("name: ") + lipgloss.NewStyle().Foreground(colorText).Render(p.Name) + "\n")
 	content.WriteString(dividerStyle.Render("---") + "\n\n")
 
-	// Description
-	content.WriteString(personaDescStyle.Render(p.Description))
+	// Description - render with glamour for proper markdown formatting
+	renderedDesc, err := m.renderer.Render(p.Description)
+	if err != nil {
+		content.WriteString(personaDescStyle.Render(p.Description))
+	} else {
+		content.WriteString(renderedDesc)
+	}
 
 	m.personaViewport.SetContent(content.String())
 }

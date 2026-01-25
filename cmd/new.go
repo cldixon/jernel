@@ -5,10 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cldixon/jernel/internal/config"
-	"github.com/cldixon/jernel/internal/llm"
-	"github.com/cldixon/jernel/internal/metrics"
-	"github.com/cldixon/jernel/internal/persona"
-	"github.com/cldixon/jernel/internal/store"
+	"github.com/cldixon/jernel/internal/entry"
 	"github.com/spf13/cobra"
 )
 
@@ -32,54 +29,24 @@ var newCmd = &cobra.Command{
 			personaName = cfg.DefaultPersona
 		}
 
-		// Load persona
-		p, err := persona.Get(personaName)
+		fmt.Printf("Creating a new jernel entry with persona: %s\n\n", personaName)
+		fmt.Println("Gathering system metrics and generating entry...")
+
+		// Generate entry using the entry package
+		result, err := entry.Generate(ctx, cfg, personaName)
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("Creating a new jernel entry with persona: %s\n\n", p.Name)
-
-		// Gather metrics
-		fmt.Println("Gathering system metrics...")
-		snapshot, err := metrics.Gather()
-		if err != nil {
-			return fmt.Errorf("failed to gather metrics: %w", err)
-		}
-
-		fmt.Printf("  Uptime:  %s\n", snapshot.Uptime)
-		fmt.Printf("  CPU:     %.1f%%\n", snapshot.CPUPercent)
-		fmt.Printf("  Memory:  %.1f%%\n", snapshot.MemoryPercent)
-		fmt.Printf("  Disk:    %.1f%%\n\n", snapshot.DiskPercent)
-
-		// Generate entry
-		fmt.Println("Generating journal entry...\n")
-		client, err := llm.NewClient(cfg)
-		if err != nil {
-			return err
-		}
-
-		result, err := client.GenerateEntry(ctx, p.Description, snapshot)
-		if err != nil {
-			return err
-		}
-
-		// Save to database
-		db, err := store.Open()
-		if err != nil {
-			return fmt.Errorf("failed to open database: %w", err)
-		}
-		defer db.Close()
-
-		entry, err := db.Save(p.Name, result.Content, result.ModelID, result.MessageID, snapshot)
-		if err != nil {
-			return fmt.Errorf("failed to save entry: %w", err)
-		}
+		fmt.Printf("\n  Uptime:  %s\n", result.Snapshot.Uptime)
+		fmt.Printf("  CPU:     %.1f%%\n", result.Snapshot.CPUPercent)
+		fmt.Printf("  Memory:  %.1f%%\n", result.Snapshot.MemoryPercent)
+		fmt.Printf("  Disk:    %.1f%%\n\n", result.Snapshot.DiskPercent)
 
 		fmt.Println("---")
-		fmt.Println(result.Content)
+		fmt.Println(result.Entry.Content)
 		fmt.Println("---")
-		fmt.Printf("\nSaved as entry #%d\n", entry.ID)
+		fmt.Printf("\nSaved as entry #%d\n", result.Entry.ID)
 
 		return nil
 	},

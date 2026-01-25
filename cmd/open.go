@@ -8,10 +8,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tuiCmd = &cobra.Command{
-	Use:   "tui",
+var openCmd = &cobra.Command{
+	Use:   "open",
 	Short: "Open the interactive journal viewer",
-	Long:  `Opens a terminal UI to browse and read journal entries.`,
+	Long:  `Opens your journal in an interactive terminal UI to browse and read entries.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		db, err := store.Open()
 		if err != nil {
@@ -29,5 +29,5 @@ var tuiCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(tuiCmd)
+	rootCmd.AddCommand(openCmd)
 }

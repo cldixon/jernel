@@ -43,7 +43,7 @@ func DefaultDaemonConfig() *DaemonConfig {
 func DefaultConfig() *Config {
 	return &Config{
 		Provider:       "anthropic",
-		Model:          "claude-4-5-sonnet-20250514",
+		Model:          "claude-sonnet-4-5-20250929",
 		DefaultPersona: "default",
 		Daemon:         DefaultDaemonConfig(),
 	}

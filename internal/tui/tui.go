@@ -293,17 +293,7 @@ func (m *Model) updateViewportContent() {
 
 	// Build content with minimal metadata header (metrics moved to side panel)
 	var content strings.Builder
-
-	// Option B: Inline pill with brackets
 	content.WriteString(fmt.Sprintf("# Entry #%d  「%s」\n\n", entry.ID, entry.Persona))
-	content.WriteString(fmt.Sprintf("%s\n\n", entry.CreatedAt.Format("Mon, Jan 02 2006 at 3:04 PM")))
-	content.WriteString("---\n\n")
-	content.WriteString(entry.Content)
-
-	content.WriteString("\n\n---\n\n")
-
-	// Option C: Colored badge style
-	content.WriteString(fmt.Sprintf("# Entry #%d · ◆ %s ◆\n\n", entry.ID, entry.Persona))
 	content.WriteString(fmt.Sprintf("%s\n\n", entry.CreatedAt.Format("Mon, Jan 02 2006 at 3:04 PM")))
 	content.WriteString("---\n\n")
 	content.WriteString(entry.Content)

@@ -115,3 +115,62 @@ func Get(name string) (*Persona, error) {
 	}
 	return p, nil
 }
+
+// Create creates a new persona file with a template and returns the file path
+func Create(name string) (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create personas directory: %w", err)
+	}
+
+	path := filepath.Join(dir, name+".md")
+
+	// Check if file already exists
+	if _, err := os.Stat(path); err == nil {
+		return "", fmt.Errorf("persona '%s' already exists", name)
+	}
+
+	// Create template content
+	content := fmt.Sprintf(`---
+name: %s
+---
+
+Describe this persona's writing style, tone, and perspective here.
+
+Consider including:
+- The persona's voice and personality
+- Their typical mood or emotional range
+- How they might perceive system metrics
+- Any quirks or unique characteristics
+`, name)
+
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return "", fmt.Errorf("failed to create persona file: %w", err)
+	}
+
+	return path, nil
+}
+
+// Delete removes a persona file
+func Delete(name string) error {
+	dir, err := Dir()
+	if err != nil {
+		return err
+	}
+
+	path := filepath.Join(dir, name+".md")
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return fmt.Errorf("persona '%s' not found", name)
+	}
+
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("failed to delete persona: %w", err)
+	}
+
+	return nil
+}

@@ -152,26 +152,8 @@ func Init() error {
 		}
 	}
 
-	// Write default personas if personas directory is empty
-	entries, _ := os.ReadDir(personaDir)
-	if len(entries) == 0 {
-		personaFiles, err := defaultPersonasFS.ReadDir("defaults/personas")
-		if err != nil {
-			return fmt.Errorf("failed to read embedded personas: %w", err)
-		}
-
-		for _, file := range personaFiles {
-			content, err := defaultPersonasFS.ReadFile("defaults/personas/" + file.Name())
-			if err != nil {
-				return fmt.Errorf("failed to read embedded persona %s: %w", file.Name(), err)
-			}
-
-			destPath := filepath.Join(personaDir, file.Name())
-			if err := os.WriteFile(destPath, content, 0644); err != nil {
-				return fmt.Errorf("failed to write persona %s: %w", file.Name(), err)
-			}
-		}
-	}
+	// Note: We no longer auto-create default personas.
+	// Users create their first persona through the TUI wizard.
 
 	return nil
 }

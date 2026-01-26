@@ -1220,8 +1220,20 @@ func (m *Model) renderMetricsPanel() string {
 		content.WriteString("\n")
 	}
 
+	// Machine identity
+	addMetric("Type", string(snap.MachineType))
+	addMetric("Time", string(snap.TimeOfDay))
+
+	content.WriteString("\n")
+
+	// Core metrics
 	addMetric("Uptime", formatDuration(snap.Uptime))
 	addMetric("CPU", fmt.Sprintf("%.1f%%", snap.CPUPercent))
+
+	if snap.Thermal != nil && snap.Thermal.CPUTemp != nil {
+		addMetric("CPU Temp", fmt.Sprintf("%.0f°C", *snap.Thermal.CPUTemp))
+	}
+
 	addMetric("Memory", fmt.Sprintf("%.1f%%", snap.MemoryPercent))
 	addMetric("Disk", fmt.Sprintf("%.1f%%", snap.DiskPercent))
 
@@ -1249,10 +1261,29 @@ func (m *Model) renderMetricsPanel() string {
 	if snap.Battery != nil {
 		content.WriteString("\n")
 		status := fmt.Sprintf("%.0f%%", snap.Battery.Percent)
-		if snap.Battery.Charging {
-			status += " ⚡"
-		}
+		// if snap.Battery.Charging {
+		// 	status += " ⚡"
+		// }
 		addMetric("Battery", status)
+	}
+
+	if snap.GPU != nil && snap.GPU.Usage != nil {
+		content.WriteString("\n")
+		addMetric("GPU", fmt.Sprintf("%.1f%%", *snap.GPU.Usage))
+	}
+
+	if snap.Thermal != nil && snap.Thermal.GPUTemp != nil {
+		addMetric("GPU Temp", fmt.Sprintf("%.0f°C", *snap.Thermal.GPUTemp))
+	}
+
+	if len(snap.Fans) > 0 {
+		// Show average fan speed
+		var totalRPM float64
+		for _, fan := range snap.Fans {
+			totalRPM += fan.Speed
+		}
+		avgRPM := totalRPM / float64(len(snap.Fans))
+		addMetric("Fan", fmt.Sprintf("%.0f RPM", avgRPM))
 	}
 
 	return lipgloss.NewStyle().
@@ -1597,6 +1628,17 @@ func formatPersonaName(name string) string {
 		}
 	}
 	return strings.Join(words, " ")
+}
+
+// truncate shortens a string to maxLen, adding ellipsis if needed
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 1 {
+		return "…"
+	}
+	return s[:maxLen-1] + "…"
 }
 
 // Run starts the TUI

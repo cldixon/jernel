@@ -44,9 +44,9 @@ type GenerateResult struct {
 }
 
 // GenerateEntry creates a journal entry based on system metrics
-func (c *Client) GenerateEntry(ctx context.Context, personaDescription string, snapshot *metrics.Snapshot) (*GenerateResult, error) {
-	promptCtx := prompt.NewContext(personaDescription, snapshot)
-	promptText, err := prompt.RenderDefault(promptCtx)
+func (c *Client) GenerateEntry(ctx context.Context, personaDescription string, snapshot *metrics.Snapshot, previousEntries []prompt.PreviousEntry) (*GenerateResult, error) {
+	promptCtx := prompt.NewContext(personaDescription, snapshot, previousEntries)
+	promptText, err := prompt.RenderMessagePrompt(promptCtx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render prompt: %w", err)
 	}

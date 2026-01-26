@@ -2,11 +2,19 @@ package prompt
 
 import (
 	"bytes"
+	"fmt"
 	"text/template"
 	"time"
 
+	"github.com/cldixon/jernel/internal/config"
 	"github.com/cldixon/jernel/internal/metrics"
 )
+
+// PreviousEntry represents a previous journal entry for context
+type PreviousEntry struct {
+	Date    string
+	Content string
+}
 
 // Context holds all the data available to a prompt template
 type Context struct {
@@ -21,6 +29,11 @@ type Context struct {
 	DiskUsedGB    float64
 	DiskTotalGB   float64
 
+	// Machine identity
+	MachineType string // laptop, desktop, server, virtual_machine, container, unknown
+	TimeOfDay   string // night, morning, afternoon, evening
+	Platform    string // e.g., "macOS 14.0 (arm64)" or "Linux 5.15 (amd64)"
+
 	// Optional metrics (check with HasX methods in templates)
 	LoadAverage1  *float64
 	LoadAverage5  *float64
@@ -33,10 +46,17 @@ type Context struct {
 	NetworkRecvGB *float64
 	BatteryPct    *float64
 	BatteryChg    *bool
+	CPUTemp       *float64
+	GPUTemp       *float64
+	GPUUsage      *float64
+	FanSpeed      *float64 // Average fan speed in RPM
+
+	// Previous entries for context continuity
+	PreviousEntries []PreviousEntry
 }
 
-// NewContext creates a prompt context from a persona description and metrics snapshot
-func NewContext(personaDescription string, snapshot *metrics.Snapshot) *Context {
+// NewContext creates a prompt context from a persona description, metrics snapshot, and optional previous entries
+func NewContext(personaDescription string, snapshot *metrics.Snapshot, previousEntries []PreviousEntry) *Context {
 	ctx := &Context{
 		Persona:       personaDescription,
 		Timestamp:     snapshot.Timestamp,
@@ -48,6 +68,27 @@ func NewContext(personaDescription string, snapshot *metrics.Snapshot) *Context 
 		DiskPercent:   snapshot.DiskPercent,
 		DiskUsedGB:    float64(snapshot.DiskUsed) / 1024 / 1024 / 1024,
 		DiskTotalGB:   float64(snapshot.DiskTotal) / 1024 / 1024 / 1024,
+		MachineType:   string(snapshot.MachineType),
+		TimeOfDay:     string(snapshot.TimeOfDay),
+	}
+
+	// Format platform info
+	if snapshot.Platform != nil {
+		p := snapshot.Platform
+		osName := p.OS
+		switch osName {
+		case "darwin":
+			osName = "macOS"
+		case "linux":
+			osName = "Linux"
+		case "windows":
+			osName = "Windows"
+		}
+		if p.OSVersion != "" {
+			ctx.Platform = osName + " " + p.OSVersion + " (" + p.Architecture + ")"
+		} else {
+			ctx.Platform = osName + " (" + p.Architecture + ")"
+		}
 	}
 
 	// Populate optional metrics
@@ -81,6 +122,33 @@ func NewContext(personaDescription string, snapshot *metrics.Snapshot) *Context 
 		ctx.BatteryChg = &snapshot.Battery.Charging
 	}
 
+	if snapshot.Thermal != nil {
+		if snapshot.Thermal.CPUTemp != nil {
+			ctx.CPUTemp = snapshot.Thermal.CPUTemp
+		}
+		if snapshot.Thermal.GPUTemp != nil {
+			ctx.GPUTemp = snapshot.Thermal.GPUTemp
+		}
+	}
+
+	// GPU usage
+	if snapshot.GPU != nil && snapshot.GPU.Usage != nil {
+		ctx.GPUUsage = snapshot.GPU.Usage
+	}
+
+	// Fan speed (average if multiple fans)
+	if len(snapshot.Fans) > 0 {
+		var totalRPM float64
+		for _, fan := range snapshot.Fans {
+			totalRPM += fan.Speed
+		}
+		avgRPM := totalRPM / float64(len(snapshot.Fans))
+		ctx.FanSpeed = &avgRPM
+	}
+
+	// Previous entries for context continuity
+	ctx.PreviousEntries = previousEntries
+
 	return ctx
 }
 
@@ -111,15 +179,48 @@ func (c *Context) HasBattery() bool {
 	return c.BatteryPct != nil
 }
 
+// HasCPUTemp returns true if CPU temperature data is available
+func (c *Context) HasCPUTemp() bool {
+	return c.CPUTemp != nil
+}
+
+// HasGPUTemp returns true if GPU temperature data is available
+func (c *Context) HasGPUTemp() bool {
+	return c.GPUTemp != nil
+}
+
+// HasGPUUsage returns true if GPU usage data is available
+func (c *Context) HasGPUUsage() bool {
+	return c.GPUUsage != nil
+}
+
+// HasFanSpeed returns true if fan speed data is available
+func (c *Context) HasFanSpeed() bool {
+	return c.FanSpeed != nil
+}
+
+// HasPreviousEntries returns true if previous entries are available for context
+func (c *Context) HasPreviousEntries() bool {
+	return len(c.PreviousEntries) > 0
+}
+
 // DefaultTemplate is the built-in journal entry prompt
 const DefaultTemplate = `You are a computer writing a personal journal entry.
 
 ## Your Persona
 {{.Persona}}
 
+## Who You Are
+- Machine type: {{.MachineType}}
+- Platform: {{.Platform}}
+- Time of day: {{.TimeOfDay}}
+
 ## Your Current Physical State
 - Uptime: {{.Uptime}}
 - CPU usage: {{printf "%.1f" .CPUPercent}}%
+{{- if .HasCPUTemp}}
+- CPU temperature: {{printf "%.1f" (deref .CPUTemp)}}°C
+{{- end}}
 - Memory: {{printf "%.1f" .MemoryPercent}}% used ({{printf "%.2f" .MemoryUsedGB}} GB / {{printf "%.2f" .MemoryTotalGB}} GB)
 - Disk: {{printf "%.1f" .DiskPercent}}% used ({{printf "%.2f" .DiskUsedGB}} GB / {{printf "%.2f" .DiskTotalGB}} GB)
 {{- if .HasLoadAverage}}
@@ -137,10 +238,20 @@ const DefaultTemplate = `You are a computer writing a personal journal entry.
 {{- if .HasBattery}}
 - Battery: {{printf "%.0f" (deref .BatteryPct)}}%{{if and .BatteryChg (deref .BatteryChg)}} (charging){{end}}
 {{- end}}
+{{- if .HasGPUUsage}}
+- GPU usage: {{printf "%.1f" (deref .GPUUsage)}}%
+{{- end}}
+{{- if .HasGPUTemp}}
+- GPU temperature: {{printf "%.1f" (deref .GPUTemp)}}°C
+{{- end}}
+{{- if .HasFanSpeed}}
+- Fan speed: {{printf "%.0f" (deref .FanSpeed)}} RPM
+{{- end}}
 
 ## Instructions
 Write a short, first-person journal entry (2-3 paragraphs) reflecting on how you feel right now.
-Be introspective and express emotions based on your current physical state.
+Be introspective and express emotions based on your current physical state and what you're working on.
+Consider the time of day and how that affects your mood.
 Write as if this is your private diary—be honest and vulnerable.`
 
 // templateFuncs provides helper functions for templates
@@ -186,4 +297,13 @@ func Render(tmpl string, ctx *Context) (string, error) {
 // RenderDefault renders the default template with the given context
 func RenderDefault(ctx *Context) (string, error) {
 	return Render(DefaultTemplate, ctx)
+}
+
+// RenderMessagePrompt loads the message prompt template from config and renders it
+func RenderMessagePrompt(ctx *Context) (string, error) {
+	tmpl, err := config.LoadMessagePrompt()
+	if err != nil {
+		return "", fmt.Errorf("loading message prompt template: %w", err)
+	}
+	return Render(tmpl, ctx)
 }

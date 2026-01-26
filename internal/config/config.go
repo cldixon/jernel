@@ -12,6 +12,9 @@ import (
 //go:embed defaults/system_prompt.md
 var DefaultSystemPrompt string
 
+//go:embed defaults/message_prompt.md
+var DefaultMessagePrompt string
+
 // DaemonConfig holds settings for autonomous entry generation
 type DaemonConfig struct {
 	Rate       int      `yaml:"rate"`        // number of entries per period
@@ -24,6 +27,7 @@ type Config struct {
 	Provider       string        `yaml:"provider"`
 	Model          string        `yaml:"model"`
 	DefaultPersona string        `yaml:"default_persona"`
+	ContextEntries int           `yaml:"context_entries"` // number of previous entries to include for continuity
 	Daemon         *DaemonConfig `yaml:"daemon,omitempty"`
 }
 
@@ -42,6 +46,7 @@ func DefaultConfig() *Config {
 		Provider:       "anthropic",
 		Model:          "claude-sonnet-4-5-20250929",
 		DefaultPersona: "default",
+		ContextEntries: 3,
 		Daemon:         DefaultDaemonConfig(),
 	}
 }
@@ -142,10 +147,18 @@ func Init() error {
 	}
 
 	// Write system prompt if it doesn't exist
-	promptPath := filepath.Join(dir, "system_prompt.md")
-	if _, err := os.Stat(promptPath); os.IsNotExist(err) {
-		if err := os.WriteFile(promptPath, []byte(DefaultSystemPrompt), 0644); err != nil {
+	systemPromptPath := filepath.Join(dir, "system_prompt.md")
+	if _, err := os.Stat(systemPromptPath); os.IsNotExist(err) {
+		if err := os.WriteFile(systemPromptPath, []byte(DefaultSystemPrompt), 0644); err != nil {
 			return fmt.Errorf("failed to write system prompt: %w", err)
+		}
+	}
+
+	// Write message prompt if it doesn't exist
+	messagePromptPath := filepath.Join(dir, "message_prompt.md")
+	if _, err := os.Stat(messagePromptPath); os.IsNotExist(err) {
+		if err := os.WriteFile(messagePromptPath, []byte(DefaultMessagePrompt), 0644); err != nil {
+			return fmt.Errorf("failed to write message prompt: %w", err)
 		}
 	}
 
@@ -177,6 +190,33 @@ func LoadSystemPrompt() (string, error) {
 			return DefaultSystemPrompt, nil
 		}
 		return "", fmt.Errorf("failed to read system prompt: %w", err)
+	}
+
+	return string(data), nil
+}
+
+// MessagePromptPath returns the path to the message prompt template file
+func MessagePromptPath() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "message_prompt.md"), nil
+}
+
+// LoadMessagePrompt reads the message prompt template from disk
+func LoadMessagePrompt() (string, error) {
+	path, err := MessagePromptPath()
+	if err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return DefaultMessagePrompt, nil
+		}
+		return "", fmt.Errorf("failed to read message prompt: %w", err)
 	}
 
 	return string(data), nil

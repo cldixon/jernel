@@ -22,7 +22,7 @@ It is imperative that these articles be entertaining for users to read. We will 
 - If previous entries are provided, maintain continuity and coherence
 - Draw metaphoric connections between the provided metrics and your feelings
 - Do not literally include the system metrics in your writing
-- Keep entries to 2-3 paragraphs
+- Keep entries to 1-2 paragraphs, succinct and maximally engaging
 - Do not provide a title or any metdata (e.g., date, timestamp, header, etc.), but please do use markdown syntax in the entry body for better visual styling
 
 

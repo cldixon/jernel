@@ -1,6 +1,8 @@
 package persona
 
 import (
+	"bytes"
+	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +11,9 @@ import (
 	"github.com/adrg/frontmatter"
 	"github.com/cldixon/jernel/internal/config"
 )
+
+//go:embed examples/*.md
+var examplesFS embed.FS
 
 // Persona defines a character voice for journal entries
 type Persona struct {
@@ -173,4 +178,39 @@ func Delete(name string) error {
 	}
 
 	return nil
+}
+
+// ListExamples returns the names of all bundled example personas
+func ListExamples() ([]string, error) {
+	entries, err := examplesFS.ReadDir("examples")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read examples: %w", err)
+	}
+
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".md" {
+			name := entry.Name()[:len(entry.Name())-3] // strip .md
+			names = append(names, name)
+		}
+	}
+
+	return names, nil
+}
+
+// GetExample loads a bundled example persona by name
+func GetExample(name string) (*Persona, error) {
+	data, err := examplesFS.ReadFile("examples/" + name + ".md")
+	if err != nil {
+		return nil, fmt.Errorf("example persona '%s' not found", name)
+	}
+
+	var p Persona
+	content, err := frontmatter.Parse(bytes.NewReader(data), &p)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse example persona: %w", err)
+	}
+
+	p.Description = strings.TrimSpace(string(content))
+	return &p, nil
 }

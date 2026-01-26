@@ -44,6 +44,7 @@ const (
 	subModeSelectPersona // for selecting persona when generating
 	subModePersonaEditor // in-TUI persona editor (create/edit)
 	subModeFirstPersona  // first-time persona creation wizard
+	subModeError         // show error message
 )
 
 // Colors - minimal palette
@@ -156,10 +157,6 @@ func (i personaItem) FilterValue() string {
 	return i.persona.Name + " " + i.persona.Description
 }
 
-// Example persona for first-time users
-const examplePersonaName = "poor_charlie"
-const examplePersonaDesc = `Charlie is a 16 year old boy who has just received the most devastating news of his life. His first - and perhaps only - girlfriend, Jennifer, has broken up with him. She relayed to him that she would prefer to see Jason, a top jock and general jerk. Charlie had begun to plan his and Jennifer's entire life together, but all of that is now over. He is distraught and may never move on. All of his many hobbies now have no taste, and food feels boring. Hopefully his friends and his mother can help him break out of his broken heart.`
-
 // Message types
 type editorFinishedMsg struct{ err error }
 type generateDoneMsg struct {
@@ -200,12 +197,13 @@ type Model struct {
 	genPersona string
 
 	// Persona editor
-	editorNameInput textinput.Model
-	editorDescInput textarea.Model
-	editorFocusName bool   // true = name focused, false = desc focused
-	editorIsNew     bool   // true = creating new, false = editing existing
-	editorOrigName  string // original name when editing (for rename detection)
-	deleteTarget    string
+	editorNameInput  textinput.Model
+	editorDescInput  textarea.Model
+	editorFocusName  bool   // true = name focused, false = desc focused
+	editorIsNew      bool   // true = creating new, false = editing existing
+	editorOrigName   string // original name when editing (for rename detection)
+	deleteTarget     string
+	deleteEntryCount int // number of entries that will be deleted with persona
 
 	// Daemon tab
 	daemonRunning bool
@@ -337,10 +335,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case generateDoneMsg:
 		m.generating = false
-		m.subMode = subModeNone
 		if msg.err != nil {
 			m.genError = msg.err
+			m.subMode = subModeError
 		} else {
+			m.subMode = subModeNone
 			m.entries = append([]*store.Entry{msg.entry}, m.entries...)
 			m.refreshEntryList()
 			m.updateEntryView()
@@ -389,6 +388,11 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSelectPersona(msg)
 	case subModePersonaEditor, subModeFirstPersona:
 		return m.handlePersonaEditor(msg)
+	case subModeError:
+		// Any key dismisses the error
+		m.subMode = subModeNone
+		m.genError = nil
+		return m, nil
 	}
 
 	// Tab navigation
@@ -459,8 +463,17 @@ func (m *Model) handleEntriesTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.loadPersonas()
 		if len(m.personas) == 0 {
-			// No personas exist - show first persona wizard
-			m.initPersonaEditor(true, "", examplePersonaName, examplePersonaDesc)
+			// No personas exist - show first persona wizard with example
+			examples, _ := persona.ListExamples()
+			if len(examples) > 0 {
+				if example, err := persona.GetExample(examples[0]); err == nil {
+					m.initPersonaEditor(true, "", example.Name, example.Description)
+				} else {
+					m.initPersonaEditor(true, "", "", "")
+				}
+			} else {
+				m.initPersonaEditor(true, "", "", "")
+			}
 			m.subMode = subModeFirstPersona
 		} else {
 			m.subMode = subModeSelectPersona
@@ -506,6 +519,14 @@ func (m *Model) handlePersonasTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		if sel := m.personaList.SelectedItem(); sel != nil {
 			m.deleteTarget = sel.(personaItem).persona.Name
+			// Get entry count for this persona
+			m.deleteEntryCount = 0
+			if db, err := store.Open(); err == nil {
+				if count, err := db.CountByPersona(m.deleteTarget); err == nil {
+					m.deleteEntryCount = count
+				}
+				db.Close()
+			}
 			m.subMode = subModeDeleteConfirm
 		}
 		return m, nil
@@ -674,8 +695,19 @@ func (m *Model) handleDeleteConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		if m.deleteTarget != "" {
+			// Delete entries first (cascade delete)
+			if m.deleteEntryCount > 0 {
+				if db, err := store.Open(); err == nil {
+					db.DeleteByPersona(m.deleteTarget)
+					db.Close()
+					// Refresh entries list if we're on entries tab
+					m.refreshEntriesFromDB()
+				}
+			}
+			// Delete the persona file
 			persona.Delete(m.deleteTarget)
 			m.deleteTarget = ""
+			m.deleteEntryCount = 0
 			m.loadPersonas()
 			m.updatePersonaView()
 		}
@@ -683,6 +715,7 @@ func (m *Model) handleDeleteConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "n", "N", "esc":
 		m.deleteTarget = ""
+		m.deleteEntryCount = 0
 		m.subMode = subModeNone
 		return m, nil
 	}
@@ -806,6 +839,22 @@ func (m *Model) refreshEntryList() {
 		items[i] = entryItem{entry: e}
 	}
 	m.entryList.SetItems(items)
+}
+
+func (m *Model) refreshEntriesFromDB() {
+	db, err := store.Open()
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	entries, err := db.List(100)
+	if err != nil {
+		return
+	}
+	m.entries = entries
+	m.refreshEntryList()
+	m.updateEntryView()
 }
 
 func (m *Model) recalculateLayout() {
@@ -960,6 +1009,8 @@ func (m *Model) renderContent() string {
 		return m.renderPersonaEditor(false)
 	case subModeFirstPersona:
 		return m.renderPersonaEditor(true)
+	case subModeError:
+		return m.renderError()
 	}
 
 	switch m.activeTab {
@@ -1221,7 +1272,7 @@ func (m *Model) renderGenerating() string {
 		"",
 		titleStyle.Render("Generating Entry"),
 		"",
-		m.genSpinner.View()+" Creating with "+m.genPersona+"...",
+		m.genSpinner.View()+" Creating with persona "+m.genPersona+"...",
 	)
 
 	return lipgloss.Place(m.width, contentHeight,
@@ -1356,13 +1407,60 @@ func (m *Model) renderPersonaEditor(isFirstTime bool) string {
 func (m *Model) renderDeleteConfirm() string {
 	contentHeight := m.height - 4
 
-	content := lipgloss.JoinVertical(lipgloss.Center,
+	// Build the confirmation message
+	var message string
+	if m.deleteEntryCount > 0 {
+		entryWord := "entry"
+		if m.deleteEntryCount > 1 {
+			entryWord = "entries"
+		}
+		message = fmt.Sprintf("Delete \"%s\" and %d associated %s?", m.deleteTarget, m.deleteEntryCount, entryWord)
+	} else {
+		message = fmt.Sprintf("Delete \"%s\"?", m.deleteTarget)
+	}
+
+	// Warning text if entries will be deleted
+	var warning string
+	if m.deleteEntryCount > 0 {
+		warning = errorStyle.Render("This action cannot be undone.")
+	}
+
+	elements := []string{
 		"",
 		titleStyle.Render("Delete Persona"),
 		"",
-		fmt.Sprintf("Delete \"%s\"?", m.deleteTarget),
+		message,
+	}
+	if warning != "" {
+		elements = append(elements, "", warning)
+	}
+	elements = append(elements,
 		"",
 		lipgloss.NewStyle().Foreground(colorFgDim).Render("Press y to confirm, n to cancel"),
+	)
+
+	content := lipgloss.JoinVertical(lipgloss.Center, elements...)
+
+	return lipgloss.Place(m.width, contentHeight,
+		lipgloss.Center, lipgloss.Center,
+		content)
+}
+
+func (m *Model) renderError() string {
+	contentHeight := m.height - 4
+
+	errMsg := "An unknown error occurred"
+	if m.genError != nil {
+		errMsg = m.genError.Error()
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Center,
+		"",
+		errorStyle.Render("Error"),
+		"",
+		lipgloss.NewStyle().Foreground(colorFg).Width(60).Render(errMsg),
+		"",
+		lipgloss.NewStyle().Foreground(colorFgDim).Render("Press any key to dismiss"),
 	)
 
 	return lipgloss.Place(m.width, contentHeight,
@@ -1388,7 +1486,7 @@ func (m *Model) renderHelpBar() string {
 	case subModePersonaEditor, subModeFirstPersona:
 		// Help shown in editor view
 		keys = nil
-	case subModeDeleteConfirm:
+	case subModeDeleteConfirm, subModeError:
 		// Help shown in modal
 		keys = nil
 	default:

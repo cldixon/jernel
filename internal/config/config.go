@@ -1,7 +1,7 @@
 package config
 
 import (
-	"embed"
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,9 +11,6 @@ import (
 
 //go:embed defaults/system_prompt.md
 var DefaultSystemPrompt string
-
-//go:embed defaults/personas/*.md
-var defaultPersonasFS embed.FS
 
 // DaemonConfig holds settings for autonomous entry generation
 type DaemonConfig struct {

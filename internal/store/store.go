@@ -169,6 +169,38 @@ func (s *Store) ListByPersona(persona string, limit int) ([]*Entry, error) {
 	return scanEntries(rows)
 }
 
+// CountByPersona returns the number of entries for a specific persona
+func (s *Store) CountByPersona(persona string) (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM entries WHERE persona = ?
+	`, persona).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count entries: %w", err)
+	}
+	return count, nil
+}
+
+// DeleteByPersona removes all entries for a specific persona
+func (s *Store) DeleteByPersona(persona string) (int64, error) {
+	result, err := s.db.Exec(`
+		DELETE FROM entries WHERE persona = ?
+	`, persona)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete entries: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// DeleteAll removes all entries from the database
+func (s *Store) DeleteAll() (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM entries`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete entries: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 // scanner interface for both *sql.Row and *sql.Rows
 type scanner interface {
 	Scan(dest ...any) error

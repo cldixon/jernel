@@ -52,7 +52,7 @@ var (
 	colorFg       = lipgloss.Color("#cccccc")
 	colorFgDim    = lipgloss.Color("#666666")
 	colorFgBright = lipgloss.Color("#ffffff")
-	colorAccent   = lipgloss.Color("#5fafaf")
+	colorAccent   = lipgloss.Color("#de4f5c") // cherry red
 	colorBorder   = lipgloss.Color("#444444")
 	colorError    = lipgloss.Color("#cc6666")
 )
@@ -113,6 +113,11 @@ var (
 
 	spinnerStyle = lipgloss.NewStyle().
 			Foreground(colorAccent)
+
+	logoStyle = lipgloss.NewStyle().
+			Foreground(colorAccent).
+			Bold(true).
+			Padding(0, 2)
 
 	statusRunning = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#66cc66"))
@@ -177,6 +182,7 @@ type Model struct {
 	height    int
 	ready     bool
 	quitting  bool
+	version   string
 
 	// Entries tab
 	entryList    list.Model
@@ -218,7 +224,7 @@ type Model struct {
 }
 
 // New creates a new TUI model
-func New(entries []*store.Entry) (*Model, error) {
+func New(entries []*store.Entry, version string) (*Model, error) {
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithWordWrap(70),
@@ -232,7 +238,7 @@ func New(entries []*store.Entry) (*Model, error) {
 	for i, e := range entries {
 		entryItems[i] = entryItem{entry: e}
 	}
-	entryList := createList(entryItems, "Entries")
+	entryList := createList(entryItems)
 
 	// Spinner for generation
 	genSpin := spinner.New()
@@ -278,10 +284,11 @@ func New(entries []*store.Entry) (*Model, error) {
 		editorFocusName: true,
 		cfg:             cfg,
 		renderer:        renderer,
+		version:         version,
 	}, nil
 }
 
-func createList(items []list.Item, title string) list.Model {
+func createList(items []list.Item) list.Model {
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
 		Foreground(colorAccent).
@@ -295,10 +302,9 @@ func createList(items []list.Item, title string) list.Model {
 		Foreground(colorFgDim)
 
 	l := list.New(items, delegate, 0, 0)
-	l.Title = title
+	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
-	l.Styles.Title = titleStyle
 	l.Styles.FilterPrompt = lipgloss.NewStyle().Foreground(colorAccent)
 	l.Styles.FilterCursor = lipgloss.NewStyle().Foreground(colorAccent)
 
@@ -820,7 +826,7 @@ func (m *Model) loadPersonas() {
 		items = append(items, personaItem{persona: p})
 	}
 
-	m.personaList = createList(items, "Personas")
+	m.personaList = createList(items)
 
 	// Size the list appropriately
 	contentHeight := m.height - 4
@@ -981,6 +987,7 @@ func (m *Model) View() string {
 }
 
 func (m *Model) renderTabBar() string {
+	// Tab navigation
 	tabs := []string{"Entries", "Personas", "Daemon", "Settings"}
 	var rendered []string
 
@@ -1053,7 +1060,7 @@ func (m *Model) renderDaemonTab() string {
 	contentHeight := m.height - 4
 
 	content.WriteString("\n")
-	content.WriteString(titleStyle.Render("Daemon Status"))
+	content.WriteString(titleStyle.Render("Status"))
 	content.WriteString("\n\n")
 
 	// Status
@@ -1642,8 +1649,8 @@ func truncate(s string, maxLen int) string {
 }
 
 // Run starts the TUI
-func Run(entries []*store.Entry) error {
-	m, err := New(entries)
+func Run(entries []*store.Entry, version string) error {
+	m, err := New(entries, version)
 	if err != nil {
 		return err
 	}

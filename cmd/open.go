@@ -24,7 +24,7 @@ var openCmd = &cobra.Command{
 			return fmt.Errorf("failed to load entries: %w", err)
 		}
 
-		return tui.Run(entries)
+		return tui.Run(entries, Version)
 	},
 }
 

@@ -2,6 +2,9 @@
 
 A journal for your machine's soul. jernel gives your computer a voice by translating system metrics into personal journal entries using LLMs.
 
+<!-- Screenshot placeholder: Add a screenshot of the TUI here -->
+<!-- ![jernel TUI](assets/screenshot.png) -->
+
 ## Installation
 
 Quick install (macOS arm64, Linux amd64):
@@ -33,7 +36,8 @@ jernel --version
 On first run, jernel creates a config directory at `~/.config/jernel/` with:
 
 - `config.yaml` — model settings and defaults
-- `system_prompt.md` — customizable LLM instructions
+- `system_prompt.md` — system prompt for the LLM
+- `message_prompt.md` — customizable entry generation template
 - `personas/` — character definitions for journal entries
 
 Set your Anthropic API key:
@@ -41,41 +45,100 @@ Set your Anthropic API key:
 export ANTHROPIC_API_KEY=your-key-here
 ```
 
-## Usage
+## Quick Start
 
-Create a new journal entry:
-```bash
-jernel new
-```
+The easiest way to use jernel is through the interactive TUI:
 
-Use a specific persona:
-```bash
-jernel new --persona dramatic
-```
-
-Open the interactive journal viewer:
 ```bash
 jernel open
 ```
 
-List recent entries:
+This opens a full-screen terminal interface where you can:
+- Browse and read journal entries
+- Generate new entries with persona selection
+- Create and edit personas with the built-in editor
+- Start/stop the daemon for automatic entry generation
+- View settings and configuration paths
+
+## CLI Commands
+
+### Entries
+
 ```bash
-jernel read --list
+# Create a new entry (uses default persona)
+jernel entry create
+
+# Create with a specific persona
+jernel entry create --persona dramatic
+
+# List recent entries
+jernel entry list
+
+# List entries for a specific persona
+jernel entry list --persona dramatic
+
+# Read the most recent entry
+jernel entry read
+
+# Read a specific entry by ID
+jernel entry read 5
 ```
 
-Read a specific entry:
+### Personas
+
 ```bash
-jernel read 1
+# List all personas
+jernel persona list
+
+# Create a new persona (opens template file)
+jernel persona create my_persona
+
+# Delete a persona (with option to delete associated entries)
+jernel persona delete my_persona
 ```
 
-Read the most recent entry:
+### Daemon
+
+The daemon runs in the background and generates entries automatically at random intervals.
+
 ```bash
-jernel read
+# Start the daemon (default: 3 entries per day)
+jernel daemon start
+
+# Start with custom rate
+jernel daemon start --rate 5 --rate-period day
+
+# Start with specific personas (randomly selected for each entry)
+jernel daemon start --personas "dramatic,thoughtful,anxious"
+
+# Check daemon status
+jernel daemon status
+
+# Stop the daemon
+jernel daemon stop
+```
+
+### Other Commands
+
+```bash
+# Open the interactive TUI
+jernel open
+
+# Delete all entries (with confirmation)
+jernel reset
 ```
 
 ## Personas
 
-Personas are markdown files in `~/.config/jernel/personas/`. Create your own:
+Personas define the voice and personality for journal entries. They are markdown files stored in `~/.config/jernel/personas/`.
+
+Create a new persona:
+```bash
+jernel persona create anxious
+```
+
+This creates a template file you can edit. Example persona:
+
 ```markdown
 ---
 name: anxious
@@ -83,11 +146,66 @@ name: anxious
 
 A nervous computer who worries about everything. High CPU usage triggers panic,
 low disk space causes existential dread. Always anticipating the next crash.
+Speaks in short, worried sentences. Often trails off with "..."
 ```
 
-Then use it:
+Use it when creating entries:
 ```bash
-jernel new --persona anxious
+jernel entry create --persona anxious
+```
+
+Or select it in the TUI when pressing `n` to create a new entry.
+
+## Context Continuity
+
+jernel includes your most recent entries (default: 3) when generating new ones, allowing the LLM to maintain narrative continuity and build on previous themes. Configure this in `config.yaml`:
+
+```yaml
+context_entries: 3  # number of previous entries to include
+```
+
+Set to `0` to disable context continuity.
+
+## Customization
+
+### Message Prompt
+
+The `~/.config/jernel/message_prompt.md` file controls how entries are generated. It's a Go template with access to:
+
+- `{{.Persona}}` — the persona description
+- `{{.MachineType}}` — laptop, desktop, server, etc.
+- `{{.TimeOfDay}}` — morning, afternoon, evening, night
+- `{{.CPUPercent}}`, `{{.MemoryPercent}}`, etc. — system metrics
+- `{{.PreviousEntries}}` — recent entries for context
+
+Power users can customize this template to change the entry format or add additional instructions.
+
+### System Prompt
+
+The `~/.config/jernel/system_prompt.md` file contains the system-level instructions for the LLM. Edit this to change the fundamental behavior of entry generation.
+
+## Development
+
+### Running Tests
+
+```bash
+go test ./...
+```
+
+With verbose output:
+```bash
+go test ./... -v
+```
+
+With race detection:
+```bash
+go test ./... -race
+```
+
+### Building
+
+```bash
+go build -o jernel .
 ```
 
 ## License

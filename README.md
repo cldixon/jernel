@@ -45,7 +45,7 @@ Set your Anthropic API key:
 export ANTHROPIC_API_KEY=your-key-here
 ```
 
-## Quick Start
+## TUI Quick Start
 
 The easiest way to use jernel is through the interactive TUI:
 
@@ -59,6 +59,8 @@ This opens a full-screen terminal interface where you can:
 - Create and edit personas with the built-in editor
 - Start/stop the daemon for automatic entry generation
 - View settings and configuration paths
+
+![](assets/jernel_tui_demo.png)
 
 ## CLI Commands
 
@@ -141,17 +143,16 @@ This creates a template file you can edit. Example persona:
 
 ```markdown
 ---
-name: anxious
+name: prof_whitlock
 ---
 
-A nervous computer who worries about everything. High CPU usage triggers panic,
-low disk space causes existential dread. Always anticipating the next crash.
-Speaks in short, worried sentences. Often trails off with "..."
+Professor Whitlock is a retired professor of english literature. His expertise was in Shakesepeare, and when under duress, is known for slipping into the rhythm and vocaburaly of the Bard himself. Somehow his days after professional life are more stressful than those before, and he seems to have developed remarkably bad luck in the twilight of his life. This has also led to a general crankiness, and an odd combination of everything being too loud while also struggling to hear others speak. His writings as of late tend toward a cantankerous recap of his daily struggles.
+
 ```
 
 Use it when creating entries:
 ```bash
-jernel entry create --persona anxious
+jernel entry create --persona prof_whitlock
 ```
 
 Or select it in the TUI when pressing `n` to create a new entry.

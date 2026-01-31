@@ -1186,7 +1186,7 @@ func (m *Model) renderMetricsPanel() string {
 	panelHeight := m.height - 6
 
 	var content strings.Builder
-	content.WriteString(titleStyle.Render("Metrics"))
+	content.WriteString(titleStyle.Render("System"))
 	content.WriteString("\n\n")
 
 	if len(m.entries) == 0 {
@@ -1210,7 +1210,7 @@ func (m *Model) renderMetricsPanel() string {
 	snap := e.MetricsSnapshot
 
 	if snap == nil {
-		content.WriteString(lipgloss.NewStyle().Foreground(colorFgDim).Render("No metrics"))
+		content.WriteString(lipgloss.NewStyle().Foreground(colorFgDim).Render("No system metrics"))
 		return lipgloss.NewStyle().
 			Width(panelWidth).
 			Height(panelHeight).
@@ -1531,7 +1531,7 @@ func (m *Model) renderHelpBar() string {
 		switch m.activeTab {
 		case tabEntries:
 			add("n", "new")
-			add("m", "metrics")
+			add("s", "system")
 			add("↑↓", "navigate")
 		case tabPersonas:
 			add("c", "create")

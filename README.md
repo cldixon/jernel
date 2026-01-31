@@ -111,7 +111,7 @@ jernel daemon start
 jernel daemon start --rate 5 --rate-period day
 
 # Start with specific personas (randomly selected for each entry)
-jernel daemon start --personas "dramatic,thoughtful,anxious"
+jernel daemon start --personas "poor_charlie,prof_whitlock"
 
 # Check daemon status
 jernel daemon status
@@ -136,7 +136,7 @@ Personas define the voice and personality for journal entries. They are markdown
 
 Create a new persona:
 ```bash
-jernel persona create anxious
+jernel persona create prof_whitlock
 ```
 
 This creates a template file you can edit. Example persona:
